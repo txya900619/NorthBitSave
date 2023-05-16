@@ -2,7 +2,7 @@
 
 defaults:
   - _self_
-  - data: mnist.yaml # choose datamodule with `test_dataloader()` for evaluation
+  - data: combine_yuv420.yaml # choose datamodule with `test_dataloader()` for evaluation
   - model: mnist.yaml
   - logger: null
   - trainer: default.yaml

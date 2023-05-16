@@ -1,0 +1,7 @@
+_target_: src.data.combine_yuv420_datamodule.CombineYUV420DataModule
+DIV2K_dir: ${oc.env:DIV2K_DIR}
+flickr2K_dir: ${oc.env:FLICKR2K_DIR}
+batch_size: 128
+train_val_test_split: [0.8, 0.1, 0.1]
+num_workers: 0
+pin_memory: False
