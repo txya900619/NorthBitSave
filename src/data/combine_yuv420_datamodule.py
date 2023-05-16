@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from lightning import LightningDataModule
+from torch import Tensor
 from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
 from torchvision import transforms
 from torchvision.datasets import MNIST
@@ -34,7 +35,7 @@ class YUV420ImageDataset(Dataset):
         )
         self.answer_transforms = transforms.RandomAdjustSharpness(sharpness_factor=2, p=1)
 
-    def __getitem__(self, index):
+    def __getitem__(self, index) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         image_path = self.image_path_list[index]
         image = read_image(image_path, mode=ImageReadMode.RGB)
         croped_image = transforms.RandomCrop((128, 128))(image)
@@ -47,7 +48,7 @@ class YUV420ImageDataset(Dataset):
 
         return input_y, input_uv, answer_y, answer_uv
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.image_path_list)
 
 
@@ -99,7 +100,7 @@ class CombineYUV420DataModule(LightningDataModule):
             self.data_val = ConcatDataset(DIV2K_val_dataset, flickr2K_val_dataset)
             self.data_test = ConcatDataset(DIV2K_test_dataset, flickr2K_test_dataset)
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> DataLoader:
         return DataLoader(
             dataset=self.data_train,
             batch_size=self.batch_size,
@@ -108,7 +109,7 @@ class CombineYUV420DataModule(LightningDataModule):
             shuffle=True,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> DataLoader:
         return DataLoader(
             dataset=self.data_val,
             batch_size=self.batch_size,
@@ -117,7 +118,7 @@ class CombineYUV420DataModule(LightningDataModule):
             shuffle=False,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self) -> DataLoader:
         return DataLoader(
             dataset=self.data_test,
             batch_size=self.batch_size,
@@ -126,7 +127,7 @@ class CombineYUV420DataModule(LightningDataModule):
             shuffle=False,
         )
 
-    def teardown(self, stage: Optional[str] = None):
+    def teardown(self, stage: Optional[str] = None) -> None:
         """Clean up after fit or test."""
         pass
 
@@ -134,7 +135,7 @@ class CombineYUV420DataModule(LightningDataModule):
         """Extra things to save to checkpoint."""
         return {}
 
-    def load_state_dict(self, state_dict: Dict[str, Any]):
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         """Things to do when loading checkpoint."""
         pass
 
