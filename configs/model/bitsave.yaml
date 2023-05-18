@@ -1,5 +1,6 @@
-_target_: src.models.mnist_module.MNISTLitModule
-
+_target_: src.models.bitsave_module.BitSaveLitModule
+lambda1: 0
+lambda2: 0
 optimizer:
   _target_: torch.optim.Adam
   _partial_: true
@@ -14,9 +15,6 @@ scheduler:
   patience: 10
 
 net:
-  _target_: src.models.components.simple_dense_net.SimpleDenseNet
-  input_size: 784
-  lin1_size: 64
-  lin2_size: 128
-  lin3_size: 64
-  output_size: 10
+  _target_: src.models.components.bitsave.BitSave
+  hiddden_channels: 12
+  num_blocks: 4
