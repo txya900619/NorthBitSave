@@ -21,24 +21,36 @@ from src.data.components.transforms import rgb_to_ycbcr420
 
 
 class YUV420ImageDataset(Dataset):
-    """Dataset for images, output is YUV420 128x128."""
+    """Dataset for images, output is YUV420 256x256."""
 
-    def __init__(self, image_path_list: List[str]):
+    def __init__(self, image_path_list: List[str], sharpness_factor: float = 2):
         self.image_path_list = image_path_list
         self.input_transforms = transforms.Compose(
-            GaussianBlur(),
-            Resize((128 // 2, 128 // 2)),
-            transforms.RandomChoice([GaussianNoise(), ShotNoise()]),
-            JpegCompression(),
-            Resize((128, 128)),
-            JpegCompression(),
+            [
+                transforms.ConvertImageDtype(torch.float),
+                GaussianBlur(),
+                Resize((256 // 2, 256 // 2)),
+                transforms.RandomChoice([GaussianNoise(), ShotNoise()]),
+                transforms.ConvertImageDtype(torch.uint8),
+                JpegCompression(),
+                transforms.ConvertImageDtype(torch.float),
+                Resize((256, 256)),
+                transforms.ConvertImageDtype(torch.uint8),
+                JpegCompression(),
+                transforms.ConvertImageDtype(torch.float),
+            ]
         )
-        self.answer_transforms = transforms.RandomAdjustSharpness(sharpness_factor=2, p=1)
+        self.answer_transforms = transforms.Compose(
+            [
+                transforms.RandomAdjustSharpness(sharpness_factor=sharpness_factor, p=1),
+                transforms.ConvertImageDtype(torch.float),
+            ]
+        )
 
     def __getitem__(self, index) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         image_path = self.image_path_list[index]
         image = read_image(image_path, mode=ImageReadMode.RGB)
-        croped_image = transforms.RandomCrop((128, 128))(image)
+        croped_image = transforms.RandomCrop((256, 256))(image)
 
         input_image = self.input_transforms(croped_image)
         answer_image = self.answer_transforms(croped_image)
@@ -59,10 +71,11 @@ class CombineYUV420DataModule(LightningDataModule):
         self,
         DIV2K_dir: str,
         flickr2K_dir: str,
-        train_val_test_split: List[float, float, float] = [0.8, 0.1, 0.1],
+        train_val_test_split: Tuple[float, float, float] = [0.8, 0.1, 0.1],
         batch_size: int = 64,
         num_workers: int = 0,
         pin_memory: bool = False,
+        sharpness_factor: float = 2,
     ) -> None:
         super().__init__()
 
@@ -74,31 +87,33 @@ class CombineYUV420DataModule(LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
+        self.sharpness_factor = sharpness_factor
 
         self.data_train: Optional[Dataset] = None
         self.data_val: Optional[Dataset] = None
         self.data_test: Optional[Dataset] = None
 
     def setup(self, stage: str) -> None:
-        seed = 42
         if not self.data_train and not self.data_val and not self.data_test:
-            DIV2K_images = glob(os.path.join(self.DIV2K_dir, "/*/*.png"))
-            flickr2K_images = glob(os.path.join(self.flicker2K_dir, "/*.png"))
+            DIV2K_images = glob(os.path.join(self.DIV2K_dir, "*/*.png"))
+            flickr2K_images = glob(os.path.join(self.flicker2K_dir, "*/*.png"))
 
             DIV2K_train_dataset, DIV2K_val_dataset, DIV2K_test_dataset = random_split(
-                YUV420ImageDataset(DIV2K_images),
-                lengths=[len(DIV2K_images) * split for split in self.train_val_test_split],
-                generator=torch.Generator().manual_seed(seed),
+                YUV420ImageDataset(DIV2K_images, self.sharpness_factor),
+                lengths=[int(len(DIV2K_images) * split) for split in self.train_val_test_split],
             )
-            flickr2K_train_dataset, flickr2K_val_dataset, flickr2K_test_dataset = random_split(
-                YUV420ImageDataset(flickr2K_images),
-                lengths=[len(flickr2K_images) * split for split in self.train_val_test_split],
-                generator=torch.Generator().manual_seed(seed),
+            (
+                flickr2K_train_dataset,
+                flickr2K_val_dataset,
+                flickr2K_test_dataset,
+            ) = random_split(
+                YUV420ImageDataset(flickr2K_images, self.sharpness_factor),
+                lengths=[int(len(flickr2K_images) * split) for split in self.train_val_test_split],
             )
 
-            self.data_train = ConcatDataset(DIV2K_train_dataset, flickr2K_train_dataset)
-            self.data_val = ConcatDataset(DIV2K_val_dataset, flickr2K_val_dataset)
-            self.data_test = ConcatDataset(DIV2K_test_dataset, flickr2K_test_dataset)
+            self.data_train = ConcatDataset([DIV2K_train_dataset, flickr2K_train_dataset])
+            self.data_val = ConcatDataset([DIV2K_val_dataset, flickr2K_val_dataset])
+            self.data_test = ConcatDataset([DIV2K_test_dataset, flickr2K_test_dataset])
 
     def train_dataloader(self) -> DataLoader:
         return DataLoader(

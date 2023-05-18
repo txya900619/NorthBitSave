@@ -33,8 +33,7 @@ class GaussianNoise:
         min = 0.08
 
         std = np.random.uniform(min, min + 0.03)
-        img = np.array(img) / 255.0
-        img = torch.clip(img + torch.normal(0, std, size=img.shape), min=0, max=1) * 255
+        img = torch.clip(img + torch.normal(0, std, size=img.shape), min=0, max=1)
         return img
 
 
@@ -46,8 +45,7 @@ class ShotNoise:
         # c = np.random.uniform(3, 60)
         min = 3
         scale = np.random.uniform(min, min + 7)
-        img = np.array(img) / 255.0
-        img = torch.clip(torch.poisson(img * scale) / float(scale), min=0, max=1) * 255
+        img = torch.clip(torch.poisson(img * scale) / float(scale), min=0, max=1)
         return img
 
 
@@ -75,8 +73,12 @@ class Resize:
         )
         if mode == "AREA":
             return F.interpolate(img.unsqueeze(0), size=self.size, mode="area").squeeze(0)
+
         else:
-            return transforms.Resize(size=self.size, interpolation=mode)(img)
+            img = transforms.ConvertImageDtype(torch.uint8)(img)
+            img = transforms.Resize(size=self.size, interpolation=mode)(img)
+            img = transforms.ConvertImageDtype(torch.float)(img)
+            return img
 
 
 class RandomCrop:

@@ -18,7 +18,7 @@ def rgb_to_ycbcr420(image: Tensor) -> Tuple[Tensor, Tensor]:
 
     2x(h/2)x(w/x), in the range of [0, 1]
     """
-    rgb = image / 255.0
+    rgb = image
     c, h, w = rgb.shape
     assert c == 3
     assert h % 2 == 0
