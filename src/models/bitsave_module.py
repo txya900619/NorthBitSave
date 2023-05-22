@@ -19,7 +19,6 @@ def dct_loss(tensor: Tensor):
         torch.abs(dct_tensor) >= threshold, torch.zeros_like(dct_tensor), dct_tensor
     )
     # return torch.mean(torch.abs(dct_tensor-torch.zeros_like(dct_tensor)))
-    print(torch.mean(torch.abs(dct_tensor)))
     return torch.mean(torch.abs(dct_tensor))
 
 
