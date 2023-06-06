@@ -3,6 +3,6 @@ DIV2K_dir: ${paths.DIV2K_dir}
 flickr2K_dir: ${paths.flickr2K_dir}
 batch_size: 128
 train_val_test_split: [0.8, 0.1, 0.1]
-num_workers: 0
+num_workers: 16
 pin_memory: False
 sharpness_factor: 2
