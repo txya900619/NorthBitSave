@@ -21,7 +21,9 @@ class JpegCompression:
 
         quality = qualities[index]
 
-        return decode_jpeg(encode_jpeg(img, quality=quality), mode=ImageReadMode.RGB)
+        return decode_jpeg(
+            encode_jpeg(img, quality=quality), mode=ImageReadMode.RGB, device=img.device
+        )
 
 
 class GaussianNoise:
@@ -55,12 +57,9 @@ class GaussianBlur:
 
     def __call__(self, img: Tensor) -> Tensor:
         # kernel = [(31,31)] prev 1 level only
-        kernel = (31, 31)
-        sigmas = [0.5, 1, 2]
-        index = np.random.randint(0, len(sigmas))
+        kernel = np.random.choice(range(3, 32, 2))
 
-        sigma = sigmas[index]
-        return transforms.GaussianBlur(kernel_size=kernel, sigma=sigma)(img)
+        return transforms.GaussianBlur(kernel_size=(kernel, kernel), sigma=(0.5, 10))(img)
 
 
 class Resize:
