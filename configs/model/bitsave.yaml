@@ -11,10 +11,11 @@ scheduler:
   _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
   _partial_: true
   mode: min
-  factor: 0.1
-  patience: 10
+  factor: 0.85
+  threshold: 0.0025
+  patience: 0
 
 net:
   _target_: src.models.components.bitsave.BitSave
-  hiddden_channels: 12
-  num_blocks: 4
+  hiddden_channels: 18
+  num_blocks: 6

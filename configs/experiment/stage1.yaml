@@ -28,10 +28,11 @@ trainer:
 #     lin3_size: 64
 model:
   net:
-    hiddden_channels: 24
+    hiddden_channels: 52
+    num_blocks: 6
 data:
   batch_size: 32
-  sharpness_factor: 1.1
+  sharpness_factor: 2
 # logger:
 #   wandb:
 #     tags: ${tags}
