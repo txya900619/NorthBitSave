@@ -1,0 +1,45 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /trainer: ddp.yaml
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+# tags: ["mnist", "simple_dense_net"]
+
+seed: 2077
+
+trainer:
+  min_epochs: 10
+  max_epochs: 50
+  gradient_clip_val: 0.5
+  log_every_n_steps: 5
+
+# model:
+#   optimizer:
+#     lr: 0.001
+#   net:
+#     lin1_size: 128
+#     lin2_size: 256
+#     lin3_size: 64
+model:
+  lambda1: 10
+  lambda2: 0.1
+  net:
+    hiddden_channels: 52
+    num_blocks: 6
+  optimizer:
+    lr: 0.0001
+data:
+  batch_size: 32
+  sharpness_factor: 4
+# logger:
+#   wandb:
+#     tags: ${tags}
+#     group: "mnist"
+#   aim:
+#     experiment: "mnist"
