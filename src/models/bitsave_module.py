@@ -1,9 +1,9 @@
 from typing import Any, Tuple
 
 import torch
-import torch_dct as dct
 from lightning import LightningModule
 from torch import Tensor
+from torchjpeg import dct
 from torchmetrics import (
     MeanMetric,
     MinMetric,
@@ -13,7 +13,7 @@ from torchmetrics import (
 
 def dct_loss(tensor: Tensor):
     # TODO: add n mask in paper
-    dct_tensor = dct.dct_2d(tensor)
+    dct_tensor = dct.batch_dct(tensor)
     threshold = torch.mean(torch.abs(dct_tensor))
     dct_tensor = torch.where(
         torch.abs(dct_tensor) >= threshold, torch.zeros_like(dct_tensor), dct_tensor
