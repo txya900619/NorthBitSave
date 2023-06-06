@@ -55,7 +55,6 @@ class BitSaveLitModule(LightningModule):
         # loss function
         self.l1_loss = torch.nn.L1Loss()
         self.y_ms_ssim_loss = MultiScaleStructuralSimilarityIndexMeasure(kernel_size=9)
-        self.uv_ms_ssim_loss = MultiScaleStructuralSimilarityIndexMeasure(kernel_size=5)
         self.lambda1 = lambda1
         self.lambda2 = lambda2
 
@@ -79,18 +78,12 @@ class BitSaveLitModule(LightningModule):
     def model_step(self, batch: Any) -> Tensor:
         input_y, input_uv, ans_y, ans_uv = batch
         logits_y, logits_uv = self.forward((input_y, input_uv))
-        # loss_y = self.l1_loss(logits_y, ans_y) + self.lambda1 * dct_loss(logits_y) + self.lambda2 * self.y_ms_ssim_loss(logits_y, ans_y)
-        # loss_uv = self.l1_loss(logits_uv, ans_uv) + self.lambda1 * dct_loss(logits_uv) + self.lambda2 * self.uv_ms_ssim_loss(logits_uv, ans_uv)
         loss_y = (
             self.l1_loss(logits_y, ans_y)
             + self.lambda1 * dct_loss(logits_y)
-            + self.lambda2 * self.y_ms_ssim_loss(logits_y, ans_y)
+            + self.lambda2 * (1 - self.y_ms_ssim_loss(logits_y, ans_y))
         )
-        loss_uv = (
-            self.l1_loss(logits_uv, ans_uv)
-            + self.lambda1 * dct_loss(logits_y)
-            + self.lambda2 * self.y_ms_ssim_loss(logits_y, ans_y)
-        )
+        loss_uv = self.l1_loss(logits_uv, ans_uv) + self.lambda1 * dct_loss(logits_uv)
         loss = (2 * loss_y + loss_uv) / 3
         return loss
 
