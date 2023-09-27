@@ -16,6 +16,5 @@ output_dir: ${hydra:runtime.output_dir}
 
 # path to working directory
 work_dir: ${hydra:runtime.cwd}
-
 DIV2K_dir: ${oc.env:DIV2K_DIR}
 flickr2K_dir: ${oc.env:FLICKR2K_DIR}
