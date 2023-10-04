@@ -1,0 +1,45 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /trainer: ddp.yaml
+  - override /data: fvc_vimeo.yaml
+  - override /model: with_FVC.yaml
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+# tags: ["mnist", "simple_dense_net"]
+
+seed: 2077
+
+trainer:
+  min_epochs: 10
+  max_epochs: 50
+  gradient_clip_val: 0.5
+  log_every_n_steps: 5
+  num_sanity_val_steps: 0
+  accumulate_grad_batches: 2
+
+#   net:
+#     lin1_size: 128
+#     lin2_size: 256
+#     lin3_size: 64
+model:
+  optimizer:
+    lr: 0.0001
+
+data:
+  batch_size: 6
+
+logger:
+  wandb:
+    project: "with_FVC"
+
+callbacks:
+  early_stopping:
+    monitor: "val/rd_loss"
+  model_checkpoint:
+    monitor: "val/rd_loss"
