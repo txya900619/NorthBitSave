@@ -1,25 +1,61 @@
-from typing import Any, Tuple
+from typing import List, Tuple
 
 import torch
+import torchvision
 from lightning import LightningModule
 from torch import Tensor
-from torchjpeg import dct
-from torchmetrics import (
-    MeanMetric,
-    MinMetric,
-    MultiScaleStructuralSimilarityIndexMeasure,
-)
+from torchmetrics import MeanMetric, MinMetric
+
+from src.data.components.transforms import ycbcr_to_rgb
 
 
-def dct_loss(tensor: Tensor):
-    # TODO: add n mask in paper
-    dct_tensor = dct.batch_dct(tensor)
-    threshold = torch.mean(torch.abs(dct_tensor))
-    dct_tensor = torch.where(
-        torch.abs(dct_tensor) >= threshold, torch.zeros_like(dct_tensor), dct_tensor
-    )
-    # return torch.mean(torch.abs(dct_tensor-torch.zeros_like(dct_tensor)))
-    return torch.mean(torch.abs(dct_tensor))
+class VGGPerceptualLoss(torch.nn.Module):
+    def __init__(self, resize=True):
+        super().__init__()
+        blocks = []
+        blocks.append(torchvision.models.vgg16(pretrained=True).features[:4].eval())
+        blocks.append(torchvision.models.vgg16(pretrained=True).features[4:9].eval())
+        blocks.append(torchvision.models.vgg16(pretrained=True).features[9:16].eval())
+        blocks.append(torchvision.models.vgg16(pretrained=True).features[16:23].eval())
+        for bl in blocks:
+            for p in bl:
+                p.requires_grad = False
+        self.blocks = torch.nn.ModuleList(blocks)
+        self.transform = torch.nn.functional.interpolate
+        self.mean = torch.nn.Parameter(torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.std = torch.nn.Parameter(torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+        self.resize = resize
+
+    def forward(
+        self,
+        input: Tensor,
+        target: Tensor,
+        feature_layers: List[int] = [0, 1, 2, 3],
+        style_layers: List[int] = [],
+    ) -> Tensor:
+        if input.shape[1] != 3:
+            input = input.repeat(1, 3, 1, 1)
+            target = target.repeat(1, 3, 1, 1)
+        input = (input - self.mean) / self.std
+        target = (target - self.mean) / self.std
+        if self.resize:
+            input = self.transform(input, mode="bilinear", size=(224, 224), align_corners=False)
+            target = self.transform(target, mode="bilinear", size=(224, 224), align_corners=False)
+        loss = 0.0
+        x = input
+        y = target
+        for i, block in enumerate(self.blocks):
+            x = block(x)
+            y = block(y)
+            if i in feature_layers:
+                loss += torch.nn.functional.l1_loss(x, y)
+            if i in style_layers:
+                act_x = x.reshape(x.shape[0], x.shape[1], -1)
+                act_y = y.reshape(y.shape[0], y.shape[1], -1)
+                gram_x = act_x @ act_x.permute(0, 2, 1)
+                gram_y = act_y @ act_y.permute(0, 2, 1)
+                loss += torch.nn.functional.l1_loss(gram_x, gram_y)
+        return loss
 
 
 class BitSaveLitModule(LightningModule):
@@ -41,8 +77,8 @@ class BitSaveLitModule(LightningModule):
         net: torch.nn.Module,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler,
-        lambda1: float = 10.0,
-        lambda2: float = 0.1,
+        # lambda1: float = 10.0,
+        # lambda2: float = 0.1,
     ):
         super().__init__()
 
@@ -54,9 +90,9 @@ class BitSaveLitModule(LightningModule):
 
         # loss function
         self.l1_loss = torch.nn.L1Loss()
-        self.y_ms_ssim_loss = MultiScaleStructuralSimilarityIndexMeasure(kernel_size=9)
-        self.lambda1 = lambda1
-        self.lambda2 = lambda2
+        # self.y_ms_ssim_loss = MultiScaleStructuralSimilarityIndexMeasure(kernel_size=9)
+        # self.lambda1 = lambda1
+        # self.lambda2 = lambda2
 
         # for averaging loss across batches
         self.train_loss = MeanMetric()
@@ -66,7 +102,12 @@ class BitSaveLitModule(LightningModule):
         # for tracking best so far validation accuracy
         self.val_loss_best = MinMetric()
 
-    def forward(self, x: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def setup(self, stage: str) -> None:
+        result = super().setup(stage)
+        self.hparams.vgg_p_loss = VGGPerceptualLoss().to(self.trainer.strategy.root_device)
+        return result
+
+    def forward(self, x: Tensor) -> Tensor:
         return self.net(x)
 
     def on_train_start(self):
@@ -75,19 +116,17 @@ class BitSaveLitModule(LightningModule):
         self.val_loss.reset()
         self.val_loss_best.reset()
 
-    def model_step(self, batch: Any) -> Tensor:
-        input_y, input_uv, ans_y, ans_uv = batch
-        logits_y, logits_uv = self.forward((input_y, input_uv))
-        loss_y = (
-            self.l1_loss(logits_y, ans_y)
-            + self.lambda1 * dct_loss(logits_y)
-            + self.lambda2 * (1 - self.y_ms_ssim_loss(logits_y, ans_y))
-        )
-        loss_uv = self.l1_loss(logits_uv, ans_uv) + self.lambda1 * dct_loss(logits_uv)
-        loss = (2 * loss_y + loss_uv) / 3
+    def model_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor]) -> Tensor:
+        input_y, input_uv, ans_y, ans_uv = batch  # only y
+        output_y = self.forward(input_y)
+
+        ans_rgb = ycbcr_to_rgb(ans_y, ans_uv)
+        ouptut_rgb = ycbcr_to_rgb(output_y, input_uv)
+
+        loss = self.l1_loss(output_y, ans_y) + self.hparams.vgg_p_loss(ouptut_rgb, ans_rgb)
         return loss
 
-    def training_step(self, batch: Any, batch_idx: int):
+    def training_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int):
         loss = self.model_step(batch)
 
         # update and log metrics
@@ -100,7 +139,7 @@ class BitSaveLitModule(LightningModule):
     def on_train_epoch_end(self):
         pass
 
-    def validation_step(self, batch: Any, batch_idx: int):
+    def validation_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int):
         loss = self.model_step(batch)
 
         # update and log metrics
@@ -114,7 +153,7 @@ class BitSaveLitModule(LightningModule):
         # otherwise metric would be reset by lightning after each epoch
         self.log("val/loss_best", self.val_loss_best.compute(), sync_dist=True, prog_bar=True)
 
-    def test_step(self, batch: Any, batch_idx: int):
+    def test_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int):
         loss = self.model_step(batch)
 
         # update and log metrics

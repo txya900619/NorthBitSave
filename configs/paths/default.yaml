@@ -18,3 +18,4 @@ output_dir: ${hydra:runtime.output_dir}
 work_dir: ${hydra:runtime.cwd}
 DIV2K_dir: ${oc.env:DIV2K_DIR}
 flickr2K_dir: ${oc.env:FLICKR2K_DIR}
+vimeo_dir: ${oc.env:VIMEO_DIR}

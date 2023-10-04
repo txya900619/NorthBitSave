@@ -1,3 +1,5 @@
+from typing import Type
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,12 +9,9 @@ from src.models.components.conv import conv_layer
 
 
 class ESA(nn.Module):
-    """
-    Enhanced Spatial Attention
-    out_channels = n_feats
-    """
+    """Enhanced Spatial Attention out_channels = n_feats."""
 
-    def __init__(self, n_feats, conv):
+    def __init__(self, n_feats: int, conv: Type[nn.Module] = nn.Conv2d):
         super().__init__()
         f = n_feats // 4
         self.conv1 = conv(n_feats, f, kernel_size=1)
@@ -25,7 +24,7 @@ class ESA(nn.Module):
         self.sigmoid = nn.Sigmoid()
         self.relu = nn.ReLU(inplace=True)
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         c1_ = self.conv1(x)
         c1 = self.conv2(c1_)
         v_max = F.max_pool2d(c1, kernel_size=7, stride=3)
@@ -41,10 +40,7 @@ class ESA(nn.Module):
 
 
 class RFDB(nn.Module):
-    """
-    Residual Feature Distillation Block
-    out_channels = in_channels
-    """
+    """Residual Feature Distillation Block out_channels = in_channels."""
 
     def __init__(self, in_channels: int):
         super().__init__()

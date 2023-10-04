@@ -1,0 +1,5 @@
+_target_: src.data.FVC_vimeo_datamodule_stage1.FVCVimeoDataModule
+vimeo_dir: ${paths.vimeo_dir}
+batch_size: 512
+train_val_split: [0.9, 0.1]
+num_workers: 32
