@@ -1,5 +1,6 @@
 from typing import List, Tuple
 
+import pyiqa
 import torch
 import torchvision
 from lightning import LightningModule
@@ -96,7 +97,13 @@ class BitSaveLitModule(LightningModule):
 
         # for averaging loss across batches
         self.train_loss = MeanMetric()
+        self.train_l1_loss = MeanMetric()
+        self.train_topiq_loss = MeanMetric()
+
         self.val_loss = MeanMetric()
+        self.val_l1_loss = MeanMetric()
+        self.val_topiq_loss = MeanMetric()
+
         self.test_loss = MeanMetric()
 
         # for tracking best so far validation accuracy
@@ -104,7 +111,10 @@ class BitSaveLitModule(LightningModule):
 
     def setup(self, stage: str) -> None:
         result = super().setup(stage)
-        self.hparams.vgg_p_loss = VGGPerceptualLoss().to(self.trainer.strategy.root_device)
+        self.hparams.topiq = pyiqa.create_metric(
+            "topiq_fr", device=self.trainer.strategy.root_device, as_loss=True
+        )
+        # self.hparams.vgg_p_loss = VGGPerceptualLoss().to(self.trainer.strategy.root_device)
         return result
 
     def forward(self, x: Tensor) -> Tensor:
@@ -114,6 +124,8 @@ class BitSaveLitModule(LightningModule):
         # by default lightning executes validation step sanity checks before training starts,
         # so it's worth to make sure validation metrics don't store results from these checks
         self.val_loss.reset()
+        self.val_l1_loss.reset()
+        self.val_topiq_loss.reset()
         self.val_loss_best.reset()
 
     def model_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor]) -> Tensor:
@@ -122,16 +134,27 @@ class BitSaveLitModule(LightningModule):
 
         ans_rgb = ycbcr_to_rgb(ans_y, ans_uv)
         ouptut_rgb = ycbcr_to_rgb(output_y, input_uv)
-
-        loss = self.l1_loss(output_y, ans_y) + self.hparams.vgg_p_loss(ouptut_rgb, ans_rgb)
-        return loss
+        l1_loss = self.l1_loss(output_y, ans_y)
+        # topiq_loss = 1 - self.hparams.topiq(ouptut_rgb)
+        topiq_loss = 1 - self.hparams.topiq(ouptut_rgb, ans_rgb)
+        # loss = l1_loss + 0.001 * topiq_loss
+        loss = l1_loss + 0.01 * topiq_loss
+        return loss, l1_loss, topiq_loss
 
     def training_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int):
-        loss = self.model_step(batch)
+        loss, l1_loss, topiq_loss = self.model_step(batch)
 
         # update and log metrics
         self.train_loss(loss)
         self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
+
+        self.train_l1_loss(l1_loss)
+        self.log("train/l1_loss", self.train_l1_loss, on_step=False, on_epoch=True, prog_bar=False)
+
+        self.train_topiq_loss(topiq_loss)
+        self.log(
+            "train/topiq_loss", self.train_topiq_loss, on_step=False, on_epoch=True, prog_bar=False
+        )
 
         # return loss or backpropagation will fail
         return loss
@@ -140,11 +163,19 @@ class BitSaveLitModule(LightningModule):
         pass
 
     def validation_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int):
-        loss = self.model_step(batch)
+        loss, l1_loss, topiq_loss = self.model_step(batch)
 
         # update and log metrics
         self.val_loss(loss)
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
+
+        self.val_l1_loss(l1_loss)
+        self.log("val/l1_loss", self.val_l1_loss, on_step=False, on_epoch=True, prog_bar=False)
+
+        self.val_topiq_loss(topiq_loss)
+        self.log(
+            "val/topiq_loss", self.val_topiq_loss, on_step=False, on_epoch=True, prog_bar=False
+        )
 
     def on_validation_epoch_end(self):
         loss = self.val_loss.compute()  # get current val acc
@@ -154,7 +185,7 @@ class BitSaveLitModule(LightningModule):
         self.log("val/loss_best", self.val_loss_best.compute(), sync_dist=True, prog_bar=True)
 
     def test_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int):
-        loss = self.model_step(batch)
+        loss, _, _ = self.model_step(batch)
 
         # update and log metrics
         self.test_loss(loss)

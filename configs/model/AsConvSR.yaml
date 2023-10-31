@@ -1,0 +1,21 @@
+_target_: src.models.bitsave_module.BitSaveLitModule
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.001
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+  _partial_: true
+  mode: min
+  factor: 0.85
+  threshold: 0.0025
+  patience: 0
+
+net:
+  _target_: src.models.components.asconvsr.AsConvSR
+  hidden_channels: 64
+  E: 3
+  temperature: 30 # useless
+  ratio: 4
+  global_residual: false
