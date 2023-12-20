@@ -4,6 +4,15 @@ from torch.nn import functional as F
 
 
 class ControlModule(nn.Module):
+    """
+    Control Module
+    Args:
+        in_channels (int): Number of channels in the input image
+        out_channels (int): Number of channels produced by the convolution
+        temperature (int): Temperature of softmax
+        ratio (int): Ratio of hidden channels to input channels
+    """
+
     def __init__(self, in_channels, out_channels, temperature=30, ratio=4, E=4):
         super().__init__()
         self.in_channels = in_channels
@@ -42,6 +51,22 @@ class ControlModule(nn.Module):
 
 
 class AssembledBlock(nn.Module):
+    """Assembled Block.
+
+    Args:
+        in_channels (int): Number of channels in the input image
+        out_channels (int): Number of channels produced by the convolution
+        kernel_size (int): Size of the convolving kernel
+        stride (int): Stride of the convolution
+        padding (int): Zero-padding added to both sides of the input
+        dilation (int): Spacing between kernel elements
+        groups (int): Number of blocked connections from input channels to output channels
+        bias (bool): If ``True``, adds a learnable bias to the output
+        E (int): Number of experts
+        temperature (int): Temperature of softmax
+        ratio (int): Ratio of hidden channels to input channels
+    """
+
     def __init__(
         self,
         in_channels,
@@ -82,7 +107,11 @@ class AssembledBlock(nn.Module):
             torch.randn(E, out_channels, out_channels // groups, kernel_size, kernel_size),
             requires_grad=True,
         )
-        self.weight1, self.weight2, self.weight3 = self.weight1, self.weight2, self.weight3
+        self.weight1, self.weight2, self.weight3 = (
+            self.weight1,
+            self.weight2,
+            self.weight3,
+        )
 
         if self.bias:
             self.bias1 = nn.Parameter(
@@ -142,66 +171,55 @@ class AssembledBlock(nn.Module):
             aggregate_bias2 = torch.zeros(bs, self.out_channels).to(x.device)  # bs, out_channels
             aggregate_bias3 = torch.zeros(bs, self.out_channels).to(x.device)  # bs, out_channels
 
-        for i in range(self.out_channels):
-            sub_coeff = coeff[:, i, :]  # bs, E
-            sub_weight1 = weight1[:, i, :]  # E, in_channels // groups * k * k
-            sub_weight2 = weight2[:, i, :]  # E, in_channels // groups * k * k
-            sub_weight3 = weight3[:, i, :]  # E, in_channels // groups * k * k
+        # use einsum instead of for loop to speed up backpropagation
+        aggregate_weight1 = torch.einsum("bce,ech->bch", coeff, weight1).view(
+            bs,
+            self.out_channels,
+            self.in_channels // self.groups,
+            self.kernel_size,
+            self.kernel_size,
+        )
+        aggregate_weight2 = torch.einsum("bce,ech->bch", coeff, weight2).view(
+            bs,
+            self.out_channels,
+            self.out_channels // self.groups,
+            self.kernel_size,
+            self.kernel_size,
+        )
+        aggregate_weight3 = torch.einsum("bce,ech->bch", coeff, weight3).view(
+            bs,
+            self.out_channels,
+            self.out_channels // self.groups,
+            self.kernel_size,
+            self.kernel_size,
+        )
+        if self.bias:
+            aggregate_bias1 = torch.einsum("bce,ec->bc", coeff, self.bias1)
+            aggregate_bias2 = torch.einsum("bce,ec->bc", coeff, self.bias2)
+            aggregate_bias3 = torch.einsum("bce,ec->bc", coeff, self.bias3)
 
-            sub_aggregate_weight1 = torch.mm(
-                sub_coeff, sub_weight1
-            )  # bs, in_channels // groups * k * k
-            aggregate_weight1[:, i, :, :, :] = sub_aggregate_weight1.view(
-                bs, self.in_channels // self.groups, self.kernel_size, self.kernel_size
-            )
-
-            sub_aggregate_weight2 = torch.mm(
-                sub_coeff, sub_weight2
-            )  # bs, in_channels // groups * k * k
-            aggregate_weight2[:, i, :, :, :] = sub_aggregate_weight2.view(
-                bs, self.out_channels // self.groups, self.kernel_size, self.kernel_size
-            )
-
-            sub_aggregate_weight3 = torch.mm(
-                sub_coeff, sub_weight3
-            )  # bs, in_channels // groups * k * k
-            aggregate_weight3[:, i, :, :, :] = sub_aggregate_weight3.view(
-                bs, self.out_channels // self.groups, self.kernel_size, self.kernel_size
-            )
-
-            if self.bias:
-                aggregate_bias1[:, i] = torch.mm(sub_coeff, self.bias1[:, i].view(self.E, 1)).view(
-                    bs
-                )  # bs
-                aggregate_bias2[:, i] = torch.mm(sub_coeff, self.bias2[:, i].view(self.E, 1)).view(
-                    bs
-                )  # bs
-                aggregate_bias3[:, i] = torch.mm(sub_coeff, self.bias3[:, i].view(self.E, 1)).view(
-                    bs
-                )  # bs
-
-        aggregate_weight1 = aggregate_weight1.view(
+        aggregate_weight1 = aggregate_weight1.reshape(
             bs * self.out_channels,
             self.in_channels // self.groups,
             self.kernel_size,
             self.kernel_size,
         )  # 1, bs * out_channels, in_channels // groups, h, w
-        aggregate_weight2 = aggregate_weight2.view(
+        aggregate_weight2 = aggregate_weight2.reshape(
             bs * self.out_channels,
             self.out_channels // self.groups,
             self.kernel_size,
             self.kernel_size,
         )  # bs * out_channels, in_channels // groups, h, w
-        aggregate_weight3 = aggregate_weight3.view(
+        aggregate_weight3 = aggregate_weight3.reshape(
             bs * self.out_channels,
             self.out_channels // self.groups,
             self.kernel_size,
             self.kernel_size,
         )  # bs * out_channels, in_channels // groups, h, w
         if self.bias:
-            aggregate_bias1 = aggregate_bias1.view(bs * self.out_channels)  # bs * out_channels
-            aggregate_bias2 = aggregate_bias2.view(bs * self.out_channels)  # bs * out_channels
-            aggregate_bias3 = aggregate_bias3.view(bs * self.out_channels)  # bs * out_channels
+            aggregate_bias1 = aggregate_bias1.reshape(bs * self.out_channels)  # bs * out_channels
+            aggregate_bias2 = aggregate_bias2.reshape(bs * self.out_channels)  # bs * out_channels
+            aggregate_bias3 = aggregate_bias3.reshape(bs * self.out_channels)  # bs * out_channels
         else:
             aggregate_bias1, aggregate_bias2, aggregate_bias3 = None, None, None
 
