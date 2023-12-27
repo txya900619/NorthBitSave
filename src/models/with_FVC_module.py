@@ -1,5 +1,6 @@
 from typing import Dict, List, Tuple
 
+import pyiqa
 import torch
 import torchvision
 from lightning import LightningModule
@@ -94,20 +95,22 @@ class WithFVCLitModule(LightningModule):
 
         self.fvc = FVC(self.train_lambda)
         load_model(self.fvc, FVC_model_path)
-        self.fvc = self.fvc.eval()
+        self.fvc = self.fvc.eval().cuda()
         for param in self.fvc.parameters():
             param.requires_grad = False
 
         # for averaging loss across batches
         self.train_rd_loss = MeanMetric()
-        self.train_mse_loss = MeanMetric()
+        self.train_fidelity_loss = MeanMetric()
         self.train_bpp = MeanMetric()
-        self.train_vgg_loss = MeanMetric()
+        self.train_perceptual_loss = MeanMetric()
+        self.train_m0_l1_loss = MeanMetric()
 
         self.val_rd_loss = MeanMetric()
-        self.val_mse_loss = MeanMetric()
+        self.val_fidelity_loss = MeanMetric()
         self.val_bpp = MeanMetric()
-        self.val_vgg_loss = MeanMetric()
+        self.val_perceptual_loss = MeanMetric()
+        self.val_m0_l1_loss = MeanMetric()
 
         self.test_rd_loss = MeanMetric()
 
@@ -116,7 +119,9 @@ class WithFVCLitModule(LightningModule):
 
     def setup(self, stage: str) -> None:
         result = super().setup(stage)
-        self.hparams.vgg_p_loss = VGGPerceptualLoss().to(self.trainer.strategy.root_device)
+        self.hparams.topiq = pyiqa.create_metric(
+            "topiq_fr", device=self.trainer.strategy.root_device, as_loss=True
+        )
         return result
 
     def forward(
@@ -131,33 +136,38 @@ class WithFVCLitModule(LightningModule):
 
         input_y, input_uv = input_yuv
         enh_input_y = self.net(input_y)
+        m0_l1_loss = torch.nn.functional.l1_loss(enh_input_y, input_y)
         enh_input_rgb = ycbcr_to_rgb(enh_input_y, input_uv)
 
         output_rgb, out = self.fvc(enh_ref_rgb, enh_input_rgb, input_rgb)
 
-        return enh_input_y, enh_ref_y, output_rgb, out
+        out["fidelity_loss"] = torch.nn.functional.l1_loss(output_rgb, input_rgb)
+        out["perceptual_loss"] = 1 - self.hparams.topiq(output_rgb, input_rgb)
+        out["m0_l1_loss"] = m0_l1_loss
+        out["rd_loss"] = (
+            out["fidelity_loss"]
+            + m0_l1_loss
+            + out["bpp"] * self.train_lambda
+            + out["perceptual_loss"] * self.train_gamma
+        )
+
+        return out
 
     def on_train_start(self):
         # by default lightning executes validation step sanity checks before training starts,
         # so it's worth to make sure validation metrics don't store results from these checks
         self.val_rd_loss.reset()
-        self.val_mse_loss.reset()
+        self.val_fidelity_loss.reset()
         self.val_bpp.reset()
         self.val_rd_loss_best.reset()
-        self.val_vgg_loss.reset()
+        self.val_perceptual_loss.reset()
+        self.val_m0_l1_loss.reset()
 
     def model_step(
         self, batch: Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]
     ) -> Dict[str, Tensor]:
         input_y, input_uv, ref_y, ref_uv, input_rgb = batch
-        enh_input_y, enh_ref_y, output_rgb, out = self.forward(
-            (ref_y, ref_uv), (input_y, input_uv), input_rgb
-        )
-
-        out["vgg_loss"] = self.hparams.vgg_p_loss(output_rgb, input_rgb)
-        out["rd_loss"] = (
-            out["mse_loss"] + out["bpp"] * self.train_lambda + out["vgg_loss"] * self.train_gamma
-        )
+        out = self.forward((ref_y, ref_uv), (input_y, input_uv), input_rgb)
 
         return out
 
@@ -166,29 +176,37 @@ class WithFVCLitModule(LightningModule):
 
         # update and log metrics
         self.train_rd_loss(out["rd_loss"])
-        self.train_mse_loss(out["mse_loss"])
+        self.train_fidelity_loss(out["fidelity_loss"])
         self.train_bpp(out["bpp"])
-        self.train_vgg_loss(out["vgg_loss"])
+        self.train_perceptual_loss(out["perceptual_loss"])
+        self.train_m0_l1_loss(out["m0_l1_loss"])
 
         self.log(
             "train/rd_loss",
             self.train_rd_loss,
-            on_step=False,
+            on_step=True,
             on_epoch=True,
             prog_bar=True,
         )
         self.log(
-            "train/mse_loss",
-            self.train_mse_loss,
-            on_step=False,
+            "train/fidelity_loss",
+            self.train_fidelity_loss,
+            on_step=True,
             on_epoch=True,
             prog_bar=False,
         )
         self.log("train/bpp", self.train_bpp, on_step=False, on_epoch=True, prog_bar=False)
         self.log(
-            "train/vgg_loss",
-            self.train_vgg_loss,
-            on_step=False,
+            "train/perceptual_loss",
+            self.train_perceptual_loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=False,
+        )
+        self.log(
+            "train/m0_l1_loss",
+            self.train_m0_l1_loss,
+            on_step=True,
             on_epoch=True,
             prog_bar=False,
         )
@@ -206,22 +224,30 @@ class WithFVCLitModule(LightningModule):
 
         # update and log metrics
         self.val_rd_loss(out["rd_loss"])
-        self.val_mse_loss(out["mse_loss"])
+        self.val_fidelity_loss(out["fidelity_loss"])
         self.val_bpp(out["bpp"])
-        self.val_vgg_loss(out["vgg_loss"])
+        self.val_perceptual_loss(out["perceptual_loss"])
+        self.val_m0_l1_loss(out["m0_l1_loss"])
 
         self.log("val/rd_loss", self.val_rd_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log(
-            "val/mse_loss",
-            self.val_mse_loss,
+            "val/fidelity_loss",
+            self.val_fidelity_loss,
             on_step=False,
             on_epoch=True,
             prog_bar=False,
         )
         self.log("val/bpp", self.val_bpp, on_step=False, on_epoch=True, prog_bar=False)
         self.log(
-            "val/vgg_loss",
-            self.val_vgg_loss,
+            "val/perceptual_loss",
+            self.val_perceptual_loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=False,
+        )
+        self.log(
+            "val/m0_l1_loss",
+            self.val_m0_l1_loss,
             on_step=False,
             on_epoch=True,
             prog_bar=False,
