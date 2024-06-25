@@ -3,10 +3,7 @@ from typing import Tuple
 import torch
 from torch import Tensor
 
-YCBCR_WEIGHTS = {
-    # Spec: (K_r, K_g, K_b) with K_g = 1 - K_r - K_b
-    "ITU-R_BT.709": (0.2126, 0.7152, 0.0722)
-}
+YCBCR_WEIGHTS = {"ITU-R_BT.709": (0.2126, 0.7152, 0.0722)}
 
 
 def rgb_to_ycbcr420(image: Tensor) -> Tuple[Tensor, Tensor]:
@@ -41,28 +38,20 @@ def rgb_to_ycbcr(rgb):
     input is 3xhxw or bx3xhxw RGB float numpy array, in the range of [0, 1]
     output is yuv: 3xhxw or bx3xhxw, in the range of [0, 1]
     """
-    shape_length = len(rgb.shape)
-    if shape_length == 3:
-        channel_index = 0
-    elif shape_length == 4:
-        channel_index = 1
-    else:
-        raise Exception("Image shape should be 3xhxw or bx3xhxw")
-
-    if rgb.shape[channel_index] != 3:
+    if rgb.shape[-3] != 3:
         raise Exception("Image channel should be 3")
 
-    r, g, b = torch.split(rgb, 1, dim=channel_index)
+    r, g, b = rgb.chunk(3, -3)
 
     Kr, Kg, Kb = YCBCR_WEIGHTS["ITU-R_BT.709"]
     y = Kr * r + Kg * g + Kb * b
     cb = 0.5 * (b - y) / (1 - Kb) + 0.5
     cr = 0.5 * (r - y) / (1 - Kr) + 0.5
 
-    yuv = torch.cat((y, cb, cr), dim=channel_index)
-    yuv = torch.clip(yuv, min=0.0, max=1.0)
+    ycbcr = torch.cat((y, cb, cr), dim=-3)
+    ycbcr = torch.clip(ycbcr, min=0.0, max=1.0)
 
-    return yuv
+    return ycbcr
 
 
 def ycbcr_to_rgb(y: Tensor, uv: Tensor) -> Tensor:

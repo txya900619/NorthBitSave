@@ -1,0 +1,6 @@
+_target_: src.data.vimeo_datamodule_y_uv.VimeoDataModule
+vimeo_dir: ${paths.vimeo_dir}
+batch_size: 32
+train_val_split: [0.9, 0.1]
+num_workers: 16
+pin_memory: False

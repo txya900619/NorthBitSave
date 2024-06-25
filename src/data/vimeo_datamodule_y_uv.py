@@ -1,5 +1,4 @@
 import os
-import random
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
@@ -90,13 +89,18 @@ class VimeoDataset(Dataset):
 
         input_yuv = rgb_to_ycbcr(input_image)
 
-        return input_yuv[:1], input_yuv[1:3], input_yuv[:1].clone(), input_yuv[1:3].clone()
+        return (
+            input_yuv[:1],
+            input_yuv[1:3],
+            input_yuv[:1].clone(),
+            input_yuv[1:3].clone(),
+        )
 
     def __len__(self) -> int:
         return len(self.image_input_list)
 
 
-class FVCVimeoDataModule(LightningDataModule):
+class VimeoDataModule(LightningDataModule):
     def __init__(
         self,
         vimeo_dir: str,
@@ -134,6 +138,7 @@ class FVCVimeoDataModule(LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
+            prefetch_factor=2,
             shuffle=True,
         )
 
@@ -143,6 +148,7 @@ class FVCVimeoDataModule(LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
+            prefetch_factor=2,
             shuffle=False,
         )
 
@@ -152,6 +158,7 @@ class FVCVimeoDataModule(LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
+            prefetch_factor=2,
             shuffle=False,
         )
 

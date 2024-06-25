@@ -1,0 +1,37 @@
+_target_: src.models.bitsave_metricgan_module.BitSaveLitModule
+optimizer_g:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.001
+
+optimizer_d:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.001
+
+scheduler_g:
+  _target_: torch.optim.lr_scheduler.StepLR
+  _partial_: true
+  step_size: 12
+  gamma: 0.5
+
+scheduler_d:
+  _target_: torch.optim.lr_scheduler.StepLR
+  _partial_: true
+  step_size: 12
+  gamma: 0.5
+
+generator:
+  _target_: src.models.components.asconvsr.AsConvSR
+  hidden_channels: 64
+  E: 3
+  temperature: 30 # useless
+  ratio: 4
+  global_residual: false
+
+discriminator:
+  _target_: src.models.components.metric_discriminator.MetricDiscriminator
+  kernel_size: [5, 5]
+  base_channels: 15
+
+gamma: 0.01
