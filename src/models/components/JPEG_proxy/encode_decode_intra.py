@@ -120,9 +120,13 @@ class EncodeDecodeIntra(nn.Module):
         if self.train_qstep:
             self.qstep = nn.Parameter(torch.tensor(qstep_init, dtype=torch.float32))
         else:
-            self.qstep = torch.tensor(qstep_init, dtype=torch.float32)
+            self.qstep = nn.Parameter(
+                torch.tensor(qstep_init, dtype=torch.float32), requires_grad=False
+            )
 
-        self.min_qstep = torch.tensor(min_qstep, dtype=torch.float32)
+        self.min_qstep = nn.Parameter(
+            torch.tensor(min_qstep, dtype=torch.float32), requires_grad=False
+        )
 
         self.clip_to_0_255 = jpeg_clip_to_0_255
 
@@ -190,7 +194,7 @@ class EncodeDecodeIntra(nn.Module):
         def calculate_non_zeros(
             dct_coeffs: Dict[str, torch.Tensor], qstep: torch.Tensor
         ) -> torch.Tensor:
-            num_nonzeros = torch.zeros(three_channel_inputs.shape[0])
+            num_nonzeros = torch.zeros(three_channel_inputs.shape[0]).to(qstep.device)
             for k in dct_coeffs:
                 num_nonzeros += (
                     (1 + (dct_coeffs[k] / qstep).abs())
@@ -204,8 +208,8 @@ class EncodeDecodeIntra(nn.Module):
         def encode_decode_inputs_with_jpeg() -> Tuple[torch.Tensor, torch.Tensor]:
             """Encodes then decodes the three_channel_inputs using actual jpeg."""
             jpeg_decoded, jpeg_rate = _encode_decode_with_jpeg(
-                three_channel_inputs.cpu().numpy(),
-                self._positive_qstep().cpu().numpy(),
+                three_channel_inputs.detach().cpu().numpy(),
+                self._positive_qstep().detach().cpu().numpy(),
                 self.run_jpeg_one_channel_at_a_time,
                 self.downsample_chroma,
             )

@@ -18,6 +18,7 @@ from typing import Dict, Tuple
 
 import numpy as np
 import torch
+from torch import nn
 from torch.nn import functional as F
 from torchvision.transforms.functional import InterpolationMode, resize
 
@@ -41,7 +42,7 @@ def differentiable_round(x: torch.Tensor) -> torch.Tensor:
     return x + x.round().detach() - x.detach()
 
 
-class JpegProxy:
+class JpegProxy(nn.Module):
     """Differentiable JPEG-like layer.
 
     Simplified for sandwich use.
@@ -65,13 +66,17 @@ class JpegProxy:
           dct_size: Size of the core 1D DCT transform.
           clip_to_0_255: True if final output should be clipped to [0, 255].
         """
+        super().__init__()
+
         self.downsample_chroma = downsample_chroma
-        self.luma_quantization_table = torch.ones(dct_size**2)
-        self.chroma_quantization_table = torch.ones(dct_size**2)
+        self.luma_quantization_table = nn.Parameter(torch.ones(dct_size**2), requires_grad=False)
+        self.chroma_quantization_table = nn.Parameter(
+            torch.ones(dct_size**2), requires_grad=False
+        )
         self.clip_to_0_255 = clip_to_0_255
 
         self.dct_size = dct_size
-        self.dct_2d_mat = self._construct_dct_2d(self.dct_size)
+        self.dct_2d_mat = nn.Parameter(self._construct_dct_2d(self.dct_size), requires_grad=False)
 
     def _construct_dct_2d(self, dct_size: int) -> torch.Tensor:
         """Returns a matrix containing the 2D DCT basis in its columns."""
@@ -111,7 +116,7 @@ class JpegProxy:
         offset = 128
         # return coefficients, with shape:
         #   [batch_size, height / dct_size, width / dct_size, dct_size * dct_size]
-        return torch.matmul(image_patches - offset, self.dct_2d_mat)
+        return torch.matmul(image_patches - offset, self.dct_2d_mat.to(image_channel.device))
 
     def _inverse_dct_2d(self, dct_coeffs: torch.Tensor) -> torch.Tensor:
         """Returns the image that is the inverse transform of the coeffs."""
@@ -125,14 +130,15 @@ class JpegProxy:
         # return channel with shape: [batch_size, 1, height, width]
         return channel.permute(0, 1, 3, 2, 4).reshape(
             channel.shape[0],
-            -1,
             channel.shape[1] * self.dct_size,
             channel.shape[2] * self.dct_size,
+            -1,
         )
 
-    def __call__(
+    def forward(
         self,
         image: torch.Tensor,
+        rounding_fn=differentiable_round,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """Compresses and decompresses input an image similar to JPEG.
 
@@ -191,7 +197,7 @@ class JpegProxy:
             quantization_table = (
                 self.luma_quantization_table if ch == 0 else self.chroma_quantization_table
             )
-            quantized_dct_coeffs[dct_keys[ch]] = differentiable_round(coeffs / quantization_table)
+            quantized_dct_coeffs[dct_keys[ch]] = rounding_fn(coeffs / quantization_table)
 
             # Dequantized DCT coefficients.
             dequantized = quantized_dct_coeffs[dct_keys[ch]] * quantization_table
