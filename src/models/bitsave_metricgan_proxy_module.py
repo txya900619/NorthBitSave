@@ -149,7 +149,7 @@ class BitSaveLitModule(LightningModule):
 
         generated_y = generated_y.mul(torch.iinfo(torch.uint8).max + 1.0 - 1e-3)
         generated_y, rate = self.proxy(generated_y)
-        generated_y = generated_y / (1.0 / torch.iinfo(torch.uint8).max)
+        generated_y = generated_y * (1.0 / torch.iinfo(torch.uint8).max)
 
         generated_y = generated_y.permute(0, 3, 1, 2)  # to (B, C, H, W)
 
@@ -197,7 +197,9 @@ class BitSaveLitModule(LightningModule):
         generated_targe_score = torch.ones_like(generated_est_score)
         adversarial_loss = self.l1_loss(generated_est_score, generated_targe_score)
         total_loss = (
-            l1_loss + adversarial_loss * self.gan_loss_weight + rate.mean() * self.rate_weight
+            l1_loss
+            + adversarial_loss * self.gan_loss_weight
+            + rate.sum() / original_y.shape.numel() * self.rate_weight
         )
 
         return total_loss, l1_loss, adversarial_loss
@@ -264,6 +266,7 @@ class BitSaveLitModule(LightningModule):
 
         # update and log metrics
         self.val_g_l1_loss(g_l1_loss)
+        self.val_rate(rate)
         self.val_generated_vmaf(generated_real_vmaf)
 
         self.log(
@@ -322,7 +325,7 @@ class BitSaveLitModule(LightningModule):
             "test/g_l1_loss",
             self.test_g_l1_loss,
             on_step=False,
-            on_epoch=False,
+            on_epoch=True,
             prog_bar=False,
         )
 
