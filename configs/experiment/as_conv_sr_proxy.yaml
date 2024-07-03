@@ -1,0 +1,36 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /trainer: ddp
+  - override /data: vimeo_y_uv
+  - override /model: AsConvSR_proxy
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+# tags: ["mnist", "simple_dense_net"]
+
+seed: 2077
+
+trainer:
+  min_epochs: 20
+  max_epochs: 50
+  log_every_n_steps: 5
+  num_sanity_val_steps: 0
+  strategy: ddp_find_unused_parameters_true
+
+model:
+  rate_weight: 30.0
+  proxy:
+    qstep_init: 7.0710678118654755 # sqrt(rate_weight)
+
+data:
+  batch_size: 64
+  # seed: ${seed}
+
+logger:
+  wandb:
+    project: "with_FVC_stage1"

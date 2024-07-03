@@ -18,6 +18,7 @@ from typing import Dict, Tuple
 
 import numpy as np
 import torch
+from einops import rearrange
 from torch import nn
 from torch.nn import functional as F
 from torchvision.transforms.functional import InterpolationMode, resize
@@ -109,14 +110,14 @@ class JpegProxy(nn.Module):
         image_patches = image_channel.unfold(1, self.dct_size, self.dct_size).unfold(
             2, self.dct_size, self.dct_size
         )
-        image_patches = image_patches.permute(0, 1, 2, 4, 5, 3).contiguous()
-        image_patches = image_patches.view(
-            image_patches.size(0), image_patches.size(1), image_patches.size(2), -1
-        )
+        image_patches = rearrange(image_patches, "b bh bw c dct1 dct2 -> b bh bw (c dct1 dct2)")
+        # image_patches = image_patches.view(
+        #     image_patches.size(0), image_patches.size(1), image_patches.size(2), -1
+        # )
         offset = 128
         # return coefficients, with shape:
         #   [batch_size, height / dct_size, width / dct_size, dct_size * dct_size]
-        return torch.matmul(image_patches - offset, self.dct_2d_mat.to(image_channel.device))
+        return torch.matmul(image_patches - offset, self.dct_2d_mat)
 
     def _inverse_dct_2d(self, dct_coeffs: torch.Tensor) -> torch.Tensor:
         """Returns the image that is the inverse transform of the coeffs."""
@@ -170,7 +171,7 @@ class JpegProxy(nn.Module):
         pad_height = ((height - 1) // pad_multiple + 1) * pad_multiple - height
         pad_width = ((width - 1) // pad_multiple + 1) * pad_multiple - width
         if pad_height or pad_width:
-            image = F.pad(image, (0, pad_width, 0, pad_height), mode="replicate")
+            image = F.pad(image, (0, 0, 0, pad_width, 0, pad_height), mode="replicate")
 
         # Encode-Decode
 

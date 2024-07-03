@@ -1,67 +1,14 @@
 import os
 from typing import Any, Dict, Optional, Tuple
 
-import numpy as np
-import torch
 from lightning import LightningDataModule
-from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset, random_split
-from torchvision import transforms
 from torchvision.io import ImageReadMode, read_image
-
-from src.data.components.transforms import rgb_to_ycbcr
-
-
-def random_crop_and_pad_image_and_labels(image, labels, size):
-    combined = torch.cat([image, labels], 0)
-    last_image_dim = image.size()[0]
-    image_shape = image.size()
-    combined_pad = F.pad(
-        combined,
-        (
-            0,
-            max(size[1], image_shape[2]) - image_shape[2],
-            0,
-            max(size[0], image_shape[1]) - image_shape[1],
-        ),
-    )
-    freesize0 = np.random.randint(0, max(size[0], image_shape[1]) - size[0] + 1)
-    freesize1 = np.random.randint(0, max(size[1], image_shape[2]) - size[1] + 1)
-    combined_crop = combined_pad[
-        :, freesize0 : freesize0 + size[0], freesize1 : freesize1 + size[1]
-    ]
-    return (combined_crop[:last_image_dim, :, :], combined_crop[last_image_dim:, :, :])
-
-
-def random_flip(images, labels):
-    # augmentation setting....
-    horizontal_flip = 1
-    vertical_flip = 1
-    transforms = 1
-
-    if transforms and vertical_flip and np.random.randint(0, 2) == 1:
-        images = torch.flip(images, [1])
-        labels = torch.flip(labels, [1])
-    if transforms and horizontal_flip and np.random.randint(0, 2) == 1:
-        images = torch.flip(images, [2])
-        labels = torch.flip(labels, [2])
-
-    return images, labels
 
 
 class VimeoDataset(Dataset):
-    def __init__(self, vimeo_folder: str, vimeo_txt_name: str, im_height=256, im_width=256):
+    def __init__(self, vimeo_folder: str, vimeo_txt_name: str):
         self.image_input_list = self.get_vimeo(vimeo_folder, vimeo_txt_name)
-
-        self.im_height = im_height
-        self.im_width = im_width
-
-        self.to_float = transforms.ConvertImageDtype(torch.float)
-        self.random_crop = transforms.RandomCrop(
-            (self.im_height, self.im_width), pad_if_needed=True
-        )
-        self.random_h_flip = transforms.RandomHorizontalFlip(p=0.5)
-        self.random_v_flip = transforms.RandomVerticalFlip(p=0.5)
 
     def get_vimeo(self, vimeo_folder, vimeo_txt_name):
         vimeo_sequnence_folder = os.path.join(vimeo_folder, "sequences")
@@ -79,22 +26,7 @@ class VimeoDataset(Dataset):
         return fns_train_input
 
     def __getitem__(self, index):
-        input_image = self.to_float(
-            read_image(self.image_input_list[index], mode=ImageReadMode.RGB)
-        )
-
-        input_image = self.random_crop(input_image)
-        input_image = self.random_h_flip(input_image)
-        input_image = self.random_v_flip(input_image)
-
-        input_yuv = rgb_to_ycbcr(input_image)
-
-        return (
-            input_yuv[:1],
-            input_yuv[1:3],
-            input_yuv[:1].clone(),
-            input_yuv[1:3].clone(),
-        )
+        return read_image(self.image_input_list[index], mode=ImageReadMode.RGB)
 
     def __len__(self) -> int:
         return len(self.image_input_list)

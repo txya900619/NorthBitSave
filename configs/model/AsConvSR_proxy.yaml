@@ -1,0 +1,41 @@
+_target_: src.models.bitsave_proxy_module.BitSaveLitModule
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.001
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.StepLR
+  _partial_: true
+  step_size: 12
+  gamma: 0.5
+
+net:
+  _target_: src.models.components.asconvsr.AsConvSR
+  hidden_channels: 64
+  E: 3
+  temperature: 30 # useless
+  ratio: 4
+  global_residual: false
+
+proxy:
+  _target_: src.models.components.JPEG_proxy.encode_decode_intra.EncodeDecodeIntra
+  min_qstep: 1
+
+augmentation:
+  _target_: torchvision.transforms.v2.Compose
+  transforms:
+    - _target_: torchvision.transforms.v2.RandomCrop
+      size: [256, 256]
+      pad_if_needed: true
+    - _target_: torchvision.transforms.v2.RandomHorizontalFlip
+      p: 0.5
+    - _target_: torchvision.transforms.v2.RandomVerticalFlip
+      p: 0.5
+    - _target_: torchvision.transforms.v2.ToDtype
+      dtype:
+        _target_: hydra.utils.get_object
+        path: torch.float32
+      scale: true
+
+rate_weight: 30

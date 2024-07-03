@@ -1,4 +1,5 @@
 import torch
+from einops import rearrange
 from torch import Tensor, nn
 from torch.nn import functional as F
 
@@ -34,8 +35,9 @@ class ControlModule(nn.Module):
 
     def forward(self, x):
         coeff = self.avgpool(x)  # bs, channels, 1, 1
-        coeff = self.net(coeff).view(x.shape[0], -1)  # bs, E * out_channels
-        coeff = coeff.view(coeff.shape[0], self.out_channels, self.E)
+        coeff = rearrange(coeff, "b c 1 1 -> b oc e", e=self.E)  # bs, channels
+        # coeff = self.net(coeff).reshape(x.shape[0], -1)  # bs, E * out_channels
+        # coeff = coeff.reshape(coeff.shape[0], self.out_channels, self.E)
         coeff = F.softmax(coeff / self.temperature, dim=2)
         return coeff
 
@@ -107,11 +109,6 @@ class AssembledBlock(nn.Module):
             torch.randn(E, out_channels, out_channels // groups, kernel_size, kernel_size),
             requires_grad=True,
         )
-        self.weight1, self.weight2, self.weight3 = (
-            self.weight1,
-            self.weight2,
-            self.weight3,
-        )
 
         if self.bias:
             self.bias1 = nn.Parameter(
@@ -123,21 +120,20 @@ class AssembledBlock(nn.Module):
             self.bias3 = nn.Parameter(
                 torch.randn(E, out_channels), requires_grad=True
             )  # E, out_channels
-            self.bias1, self.bias2, self.bias3 = self.bias1, self.bias2, self.bias3
 
     def forward(self, x: Tensor):
         bs, in_channels, h, w = x.shape
         coeff = self.control_module(x)  # bs, out_channels, E
-        weight1 = self.weight1.view(
+        weight1 = self.weight1.reshape(
             self.E, self.out_channels, -1
         )  # E, out_channels, in_channels // groups * k * k
-        weight2 = self.weight2.view(
+        weight2 = self.weight2.reshape(
             self.E, self.out_channels, -1
         )  # E, out_channels, in_channels // groups * k * k
-        weight3 = self.weight3.view(
+        weight3 = self.weight3.reshape(
             self.E, self.out_channels, -1
         )  # E, out_channels, in_channels // groups * k * k
-        x = x.view(1, bs * in_channels, h, w)  # 1, bs * in_channels, h, w
+        x = x.reshape(1, bs * in_channels, h, w)  # 1, bs * in_channels, h, w
 
         aggregate_weight1 = torch.zeros(
             bs,
@@ -172,21 +168,21 @@ class AssembledBlock(nn.Module):
             aggregate_bias3 = torch.zeros(bs, self.out_channels).to(x.device)  # bs, out_channels
 
         # use einsum instead of for loop to speed up backpropagation
-        aggregate_weight1 = torch.einsum("bce,ech->bch", coeff, weight1).view(
+        aggregate_weight1 = torch.einsum("bce,ech->bch", coeff, weight1).reshape(
             bs,
             self.out_channels,
             self.in_channels // self.groups,
             self.kernel_size,
             self.kernel_size,
         )
-        aggregate_weight2 = torch.einsum("bce,ech->bch", coeff, weight2).view(
+        aggregate_weight2 = torch.einsum("bce,ech->bch", coeff, weight2).reshape(
             bs,
             self.out_channels,
             self.out_channels // self.groups,
             self.kernel_size,
             self.kernel_size,
         )
-        aggregate_weight3 = torch.einsum("bce,ech->bch", coeff, weight3).view(
+        aggregate_weight3 = torch.einsum("bce,ech->bch", coeff, weight3).reshape(
             bs,
             self.out_channels,
             self.out_channels // self.groups,
@@ -203,7 +199,7 @@ class AssembledBlock(nn.Module):
             self.in_channels // self.groups,
             self.kernel_size,
             self.kernel_size,
-        )  # 1, bs * out_channels, in_channels // groups, h, w
+        )  # bs * out_channels, in_channels // groups, h, w
         aggregate_weight2 = aggregate_weight2.reshape(
             bs * self.out_channels,
             self.out_channels // self.groups,
@@ -250,6 +246,6 @@ class AssembledBlock(nn.Module):
             dilation=self.dilation,
             groups=self.groups * bs,
         )  # bs * out_channels, in_channels // groups, h, w
-        out = out.view(bs, self.out_channels, out.shape[2], out.shape[3])
+        out = out.reshape(bs, self.out_channels, out.shape[2], out.shape[3])
 
         return out
