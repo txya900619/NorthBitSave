@@ -97,25 +97,17 @@ class AssembledBlock(nn.Module):
         self.temperature = temperature
         self.ratio = ratio
 
-        self.control_module = ControlModule(
-            in_channels, out_channels, temperature, ratio, E
-        )
+        self.control_module = ControlModule(in_channels, out_channels, temperature, ratio, E)
         self.weight1 = nn.Parameter(
-            torch.randn(
-                E, out_channels, in_channels // groups, kernel_size, kernel_size
-            ),
+            torch.randn(E, out_channels, in_channels // groups, kernel_size, kernel_size),
             requires_grad=True,
         )
         self.weight2 = nn.Parameter(
-            torch.randn(
-                E, out_channels, out_channels // groups, kernel_size, kernel_size
-            ),
+            torch.randn(E, out_channels, out_channels // groups, kernel_size, kernel_size),
             requires_grad=True,
         )
         self.weight3 = nn.Parameter(
-            torch.randn(
-                E, out_channels, out_channels // groups, kernel_size, kernel_size
-            ),
+            torch.randn(E, out_channels, out_channels // groups, kernel_size, kernel_size),
             requires_grad=True,
         )
 
@@ -150,31 +142,31 @@ class AssembledBlock(nn.Module):
             self.in_channels // self.groups,
             self.kernel_size,
             self.kernel_size,
-        ).to(x.device)  # bs, out_channels, in_channels // groups, k, k
+        ).to(
+            x.device
+        )  # bs, out_channels, in_channels // groups, k, k
         aggregate_weight2 = torch.zeros(
             bs,
             self.out_channels,
             self.out_channels // self.groups,
             self.kernel_size,
             self.kernel_size,
-        ).to(x.device)  # bs, out_channels, in_channels // groups, k, k
+        ).to(
+            x.device
+        )  # bs, out_channels, in_channels // groups, k, k
         aggregate_weight3 = torch.zeros(
             bs,
             self.out_channels,
             self.out_channels // self.groups,
             self.kernel_size,
             self.kernel_size,
-        ).to(x.device)  # bs, out_channels, in_channels // groups, k, k
+        ).to(
+            x.device
+        )  # bs, out_channels, in_channels // groups, k, k
         if self.bias:
-            aggregate_bias1 = torch.zeros(bs, self.out_channels).to(
-                x.device
-            )  # bs, out_channels
-            aggregate_bias2 = torch.zeros(bs, self.out_channels).to(
-                x.device
-            )  # bs, out_channels
-            aggregate_bias3 = torch.zeros(bs, self.out_channels).to(
-                x.device
-            )  # bs, out_channels
+            aggregate_bias1 = torch.zeros(bs, self.out_channels).to(x.device)  # bs, out_channels
+            aggregate_bias2 = torch.zeros(bs, self.out_channels).to(x.device)  # bs, out_channels
+            aggregate_bias3 = torch.zeros(bs, self.out_channels).to(x.device)  # bs, out_channels
 
         # use einsum instead of for loop to speed up backpropagation
         aggregate_weight1 = torch.einsum("bce,ech->bch", coeff, weight1).reshape(
@@ -222,15 +214,9 @@ class AssembledBlock(nn.Module):
             self.kernel_size,
         )  # bs * out_channels, in_channels // groups, h, w
         if self.bias:
-            aggregate_bias1 = aggregate_bias1.reshape(
-                bs * self.out_channels
-            )  # bs * out_channels
-            aggregate_bias2 = aggregate_bias2.reshape(
-                bs * self.out_channels
-            )  # bs * out_channels
-            aggregate_bias3 = aggregate_bias3.reshape(
-                bs * self.out_channels
-            )  # bs * out_channels
+            aggregate_bias1 = aggregate_bias1.reshape(bs * self.out_channels)  # bs * out_channels
+            aggregate_bias2 = aggregate_bias2.reshape(bs * self.out_channels)  # bs * out_channels
+            aggregate_bias3 = aggregate_bias3.reshape(bs * self.out_channels)  # bs * out_channels
         else:
             aggregate_bias1, aggregate_bias2, aggregate_bias3 = None, None, None
 
