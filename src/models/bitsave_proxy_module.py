@@ -140,6 +140,7 @@ class BitSaveLitModule(LightningModule):
         pass
 
     def validation_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int):
+        batch = self.process_batch(batch)
         loss, l1_loss, un_compressed_l1_loss, rate = self.model_step(batch)
 
         # update and log metrics
@@ -171,6 +172,7 @@ class BitSaveLitModule(LightningModule):
         self.log("val/loss_best", self.val_loss_best.compute(), sync_dist=True, prog_bar=True)
 
     def test_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int):
+        batch = self.process_batch(batch)
         loss, _, _, _ = self.model_step(batch)
 
         # update and log metrics
