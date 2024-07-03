@@ -103,11 +103,9 @@ class BitSaveLitModule(LightningModule):
 
         processed_y, compressed_y, rate = self.forward(original_y)
 
-        rate = rate.sum() / original_y.shape.numel()
-
         l1_loss = self.l1_loss(compressed_y, original_y)
         un_compressed_l1_loss = self.l1_loss(processed_y, original_y)
-        loss = l1_loss + self.rate_weight * processed_y
+        loss = l1_loss + self.rate_weight * rate
         return loss, l1_loss, un_compressed_l1_loss, rate
 
     def training_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int):
