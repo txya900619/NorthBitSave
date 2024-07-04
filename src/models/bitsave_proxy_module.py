@@ -108,7 +108,7 @@ class BitSaveLitModule(LightningModule):
         loss = l1_loss + self.rate_weight * rate
         return loss, l1_loss, un_compressed_l1_loss, rate
 
-    def training_step(self, batch: Tuple[Tensor, Tensor, Tensor, Tensor], batch_idx: int):
+    def training_step(self, batch: Tensor, batch_idx: int):
         batch = self.process_batch(batch)
         loss, l1_loss, un_compressed_l1_loss, rate = self.model_step(batch)
 
@@ -121,9 +121,9 @@ class BitSaveLitModule(LightningModule):
         self.train_un_compressed_l1_loss(un_compressed_l1_loss)
 
         loss_dict = {
-            "train/l1_loss": l1_loss,
-            "train/rate": rate,
-            "train/un_compressed_l1_loss": un_compressed_l1_loss,
+            "train/l1_loss": self.train_l1_loss,
+            "train/rate": self.train_rate,
+            "train/un_compressed_l1_loss": self.train_un_compressed_l1_loss,
         }
 
         self.log_dict(
@@ -152,9 +152,9 @@ class BitSaveLitModule(LightningModule):
         self.val_rate(rate)
 
         loss_dict = {
-            "val/l1_loss": l1_loss,
-            "val/un_compressed_l1_loss": un_compressed_l1_loss,
-            "val/rate": rate,
+            "val/l1_loss": self.val_l1_loss,
+            "val/un_compressed_l1_loss": self.val_un_compressed_l1_loss,
+            "val/rate": self.val_rate,
         }
 
         self.log_dict(
