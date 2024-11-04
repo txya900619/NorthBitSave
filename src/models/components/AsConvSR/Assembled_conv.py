@@ -125,16 +125,11 @@ class AssembledBlock(nn.Module):
     def forward(self, x: Tensor):
         bs, in_channels, h, w = x.shape
         coeff = self.control_module(x)  # bs, out_channels, E
-        weight1 = self.weight1.reshape(
-            self.E, self.out_channels, -1
-        )  # E, out_channels, in_channels // groups * k * k
-        weight2 = self.weight2.reshape(
-            self.E, self.out_channels, -1
-        )  # E, out_channels, in_channels // groups * k * k
-        weight3 = self.weight3.reshape(
-            self.E, self.out_channels, -1
-        )  # E, out_channels, in_channels // groups * k * k
-        x = x.reshape(1, bs * in_channels, h, w)  # 1, bs * in_channels, h, w
+        weight1 = rearrange(self.weight1, "e oc ic k1 k2 -> e oc (ic k1 k2)")
+        weight2 = rearrange(self.weight2, "e oc ic k1 k2 -> e oc (ic k1 k2)")
+        weight3 = rearrange(self.weight3, "e oc ic k1 k2 -> e oc (ic k1 k2)")
+
+        x = rearrange(x, "b ic h w -> () (b ic) h w")  # 1, bs * in_channels, h, w
 
         aggregate_weight1 = torch.zeros(
             bs,
@@ -169,54 +164,39 @@ class AssembledBlock(nn.Module):
             aggregate_bias3 = torch.zeros(bs, self.out_channels).to(x.device)  # bs, out_channels
 
         # use einsum instead of for loop to speed up backpropagation
-        aggregate_weight1 = torch.einsum("bce,ech->bch", coeff, weight1).reshape(
-            bs,
-            self.out_channels,
-            self.in_channels // self.groups,
-            self.kernel_size,
-            self.kernel_size,
+        aggregate_weight1 = torch.einsum("bce,ech->bch", coeff, weight1)
+        aggregate_weight1 = rearrange(
+            aggregate_weight1,
+            "b oc (num_groups k1 k2) -> (b oc) num_groups k1 k2",
+            k1=self.kernel_size,
+            k2=self.kernel_size,
         )
-        aggregate_weight2 = torch.einsum("bce,ech->bch", coeff, weight2).reshape(
-            bs,
-            self.out_channels,
-            self.out_channels // self.groups,
-            self.kernel_size,
-            self.kernel_size,
+
+        aggregate_weight2 = torch.einsum("bce,ech->bch", coeff, weight2)
+        aggregate_weight2 = rearrange(
+            aggregate_weight2,
+            "b oc (num_groups k1 k2) -> (b oc) num_groups k1 k2",
+            k1=self.kernel_size,
+            k2=self.kernel_size,
         )
-        aggregate_weight3 = torch.einsum("bce,ech->bch", coeff, weight3).reshape(
-            bs,
-            self.out_channels,
-            self.out_channels // self.groups,
-            self.kernel_size,
-            self.kernel_size,
+
+        aggregate_weight3 = torch.einsum("bce,ech->bch", coeff, weight3)
+        aggregate_weight3 = rearrange(
+            aggregate_weight3,
+            "b oc (num_groups k1 k2) -> (b oc) num_groups k1 k2",
+            num_groups=self.out_channels // self.groups,
+            k1=self.kernel_size,
+            k2=self.kernel_size,
         )
+
         if self.bias:
             aggregate_bias1 = torch.einsum("bce,ec->bc", coeff, self.bias1)
             aggregate_bias2 = torch.einsum("bce,ec->bc", coeff, self.bias2)
             aggregate_bias3 = torch.einsum("bce,ec->bc", coeff, self.bias3)
 
-        aggregate_weight1 = aggregate_weight1.reshape(
-            bs * self.out_channels,
-            self.in_channels // self.groups,
-            self.kernel_size,
-            self.kernel_size,
-        )  # bs * out_channels, in_channels // groups, h, w
-        aggregate_weight2 = aggregate_weight2.reshape(
-            bs * self.out_channels,
-            self.out_channels // self.groups,
-            self.kernel_size,
-            self.kernel_size,
-        )  # bs * out_channels, in_channels // groups, h, w
-        aggregate_weight3 = aggregate_weight3.reshape(
-            bs * self.out_channels,
-            self.out_channels // self.groups,
-            self.kernel_size,
-            self.kernel_size,
-        )  # bs * out_channels, in_channels // groups, h, w
-        if self.bias:
-            aggregate_bias1 = aggregate_bias1.reshape(bs * self.out_channels)  # bs * out_channels
-            aggregate_bias2 = aggregate_bias2.reshape(bs * self.out_channels)  # bs * out_channels
-            aggregate_bias3 = aggregate_bias3.reshape(bs * self.out_channels)  # bs * out_channels
+            aggregate_bias1 = rearrange(aggregate_bias1, "b oc -> (b oc)")
+            aggregate_bias2 = rearrange(aggregate_bias2, "b oc -> (b oc)")
+            aggregate_bias3 = rearrange(aggregate_bias3, "b oc -> (b oc)")
         else:
             aggregate_bias1, aggregate_bias2, aggregate_bias3 = None, None, None
 
