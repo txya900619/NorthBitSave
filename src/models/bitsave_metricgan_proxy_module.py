@@ -1,5 +1,6 @@
 import json
 import subprocess
+from itertools import chain
 from pathlib import Path
 from subprocess import check_call
 from tempfile import TemporaryDirectory
@@ -16,11 +17,13 @@ from torchmetrics import MaxMetric, MeanMetric
 from torchvision.transforms.v2 import Compose
 
 from src.data.components.transforms import rgb_to_ycbcr
+from src.models.components.JPEG_proxy.encode_decode_intra import EncodeDecodeIntra
 
 vmaf_command = "vmaf --reference {reference} --distorted {distorted} -w {width} -h {height} -p 420 -b 8 --threads {threads} --json -o {output}"
 
 
 def to_255(x: Tensor) -> Tensor:
+    # Scale the tensor to the range [0, 255] for uint8 representation
     return x.mul(torch.iinfo(torch.uint8).max + 1.0 - 1e-3)
 
 
@@ -97,12 +100,12 @@ class BitSaveLitModule(LightningModule):
         self,
         generator: torch.nn.Module,
         discriminator: torch.nn.Module,
-        proxy: torch.nn.Module,
         augmentation: Compose,
         optimizer_g: torch.optim.Optimizer,
         optimizer_d: torch.optim.Optimizer,
         scheduler_g: torch.optim.lr_scheduler,
         scheduler_d: torch.optim.lr_scheduler,
+        proxy: torch.nn.Module = None,
         gan_loss_weight: float = 0.01,
         rate_weight: float = 0.01,
         un_compress_weight: float = 0.01,
@@ -112,11 +115,15 @@ class BitSaveLitModule(LightningModule):
         Args:
             generator (torch.nn.Module): The generator model.
             discriminator (torch.nn.Module): The discriminator model.
+            augmentation (Compose): The data augmentation pipeline.
             optimizer_g (torch.optim.Optimizer): The optimizer for the generator.
             optimizer_d (torch.optim.Optimizer): The optimizer for the discriminator.
             scheduler_g (torch.optim.lr_scheduler): The learning rate scheduler for the generator.
             scheduler_d (torch.optim.lr_scheduler): The learning rate scheduler for the discriminator.
-            gamma (float, optional): The scaler for the adversarial loss. Defaults to 0.01.
+            proxy (torch.nn.Module, optional): The proxy model. Defaults to None.
+            gan_loss_weight (float, optional): The weight of the GAN loss. Defaults to 0.01.
+            rate_weight (float, optional): The weight of the rate loss. Defaults to 0.01.
+            un_compress_weight (float, optional): The weight of the uncompressed loss. Defaults to 0.01.
         """
         super().__init__()
 
@@ -125,6 +132,9 @@ class BitSaveLitModule(LightningModule):
         # this line allows to access init params with 'self.hparams' attribute
         # also ensures init params will be stored in ckpt
         self.save_hyperparameters(logger=False)
+
+        if proxy is None:
+            proxy = EncodeDecodeIntra()
 
         self.generator = generator
         self.discriminator = discriminator
@@ -219,11 +229,9 @@ class BitSaveLitModule(LightningModule):
         """
         l1_loss = self.l1_loss(compressed_y, original_y)
         un_compress_l1_loss = self.l1_loss(processed_y, original_y)
-        compressed_est_score = self.discriminator(
-            torch.cat([compressed_y.detach(), original_y], dim=1)
-        )
-        compressed_targe_score = torch.ones_like(compressed_est_score)
-        adversarial_loss = self.l1_loss(compressed_est_score, compressed_targe_score)
+        compressed_est_score = self.discriminator(torch.cat([compressed_y, original_y], dim=1))
+        compressed_target_score = torch.ones_like(compressed_est_score)
+        adversarial_loss = self.l1_loss(compressed_est_score, compressed_target_score)
         total_loss = (
             l1_loss
             + adversarial_loss * self.gan_loss_weight
@@ -245,7 +253,7 @@ class BitSaveLitModule(LightningModule):
             compressed_y, original_y
         )
         self.manual_backward(d_total_loss)
-        self.clip_gradients(optimizer_d, gradient_clip_val=0.5, gradient_clip_algorithm="norm")
+        self.clip_gradients(optimizer_d, gradient_clip_val=5.0, gradient_clip_algorithm="norm")
         optimizer_d.step()
 
         optimizer_g.zero_grad()
@@ -256,7 +264,7 @@ class BitSaveLitModule(LightningModule):
             rate,
         )
         self.manual_backward(g_total_loss)
-        self.clip_gradients(optimizer_g, gradient_clip_val=0.5, gradient_clip_algorithm="norm")
+        self.clip_gradients(optimizer_g, gradient_clip_val=5.0, gradient_clip_algorithm="norm")
         optimizer_g.step()
 
         self.train_g_total_loss(g_total_loss)
@@ -288,9 +296,7 @@ class BitSaveLitModule(LightningModule):
         self.log_dict(loss_dict, on_step=False, on_epoch=True, prog_bar=False)
 
     def on_train_epoch_end(self):
-        scheduler_g, scheduler_d = self.lr_schedulers()
-        scheduler_g.step()
-        scheduler_d.step()
+        pass
 
     def validation_step(self, batch: Tensor, batch_idx: int):
         original_y = self.process_batch(batch)
@@ -330,10 +336,16 @@ class BitSaveLitModule(LightningModule):
             )
 
     def on_validation_epoch_end(self):
+        un_compress_l1_loss = self.val_g_un_compress_l1_loss.compute()
+        scheduler_g, scheduler_d = self.lr_schedulers()
+        scheduler_g.step(un_compress_l1_loss)
+        scheduler_d.step(un_compress_l1_loss)
+
         compressed_vmaf = self.val_compressed_vmaf.compute()  # get current val acc
         self.val_compressed_vmaf_best(compressed_vmaf)  # update best so far val acc
         # log `val_acc_best` as a value through `.compute()` method, instead of as a metric object
         # otherwise metric would be reset by lightning after each epoch
+
         self.log(
             "val/loss_best",
             self.val_compressed_vmaf_best.compute(),
@@ -376,7 +388,9 @@ class BitSaveLitModule(LightningModule):
         Examples:
             https://lightning.ai/docs/pytorch/latest/common/lightning_module.html#configure-optimizers
         """
-        optimizer_g = self.hparams.optimizer_g(params=self.generator.parameters())
+        optimizer_g = self.hparams.optimizer_g(
+            params=chain(self.generator.parameters(), self.proxy.parameters())
+        )
         optimizer_d = self.hparams.optimizer_d(params=self.discriminator.parameters())
         scheduler_g = self.hparams.scheduler_g(optimizer=optimizer_g)
         scheduler_d = self.hparams.scheduler_d(optimizer=optimizer_d)
